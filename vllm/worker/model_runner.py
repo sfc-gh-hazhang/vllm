@@ -919,7 +919,7 @@ class ModelRunner:
 
         # Prepare buffer for outputs. These will be reused for all batch sizes.
         # It will be filled after the first graph capture.
-        hidden_states: Optional[torch.Tensor] = None
+        hidden_states: List[Optional[torch.Tensor]] = [None] * self.parallel_config.pipeline_parallel_size
 
         graph_batch_size = _get_graph_batch_size(
             self.scheduler_config.max_num_seqs)
@@ -952,11 +952,11 @@ class ModelRunner:
                     )
 
                     graph_runner = CUDAGraphRunner(self.model)
-                    hidden_states = graph_runner.capture(
+                    hidden_states[virtual_engine] = graph_runner.capture(
                         input_tokens[:batch_size],
                         input_positions[:batch_size],
-                        hidden_states[:batch_size]
-                        if hidden_states is not None else None,
+                        hidden_states[virtual_engine][:batch_size]
+                        if hidden_states[virtual_engine] is not None else None,
                         kv_caches[virtual_engine],
                         attn_metadata,
                         memory_pool=self.graph_memory_pool,
