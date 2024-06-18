@@ -121,8 +121,7 @@ def send_recv_test_worker(tp_size: int, pp_size: int, rank: int,
     if not is_pipeline_model_parallel_first_rank():
         t1, t2 = recv_prev_rank(num_tensors=2,
                                 size=size,
-                                dtype=torch.float32,
-                                device="cuda")
+                                dtype=torch.float32)
     else:
         t1 = torch.ones(size=size, dtype=torch.float32, device="cuda")
         t2 = 2 * torch.ones(size=size, dtype=torch.float32, device="cuda")
