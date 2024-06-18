@@ -1,95 +1,61 @@
 import os
-import subprocess
-import sys
-import time
 
 import openai  # use the official client for correctness check
 import pytest
 # using Ray for overall ease of process management, parallel requests,
 # and debugging.
 import ray
-import requests
+
+from ..utils import VLLM_PATH, RemoteOpenAIServer
 
 # downloading lora to test lora requests
 
-MAX_SERVER_START_WAIT_S = 600  # wait for server to start for 60 seconds
 # any model with a chat template should work here
 MODEL_NAME = "meta-llama/Meta-Llama-3-8B"
-EAGER_MODE = os.getenv("EAGER_MODE", None)
-CHUNKED_PREFILL = os.getenv("CHUNKED_PREFILL", None)
+EAGER_MODE = bool(int(os.getenv("EAGER_MODE", None)))
+CHUNKED_PREFILL = bool(int(os.getenv("CHUNKED_PREFILL", None)))
+TP_SIZE = int(os.getenv("TP_SIZE", 1))
+PP_SIZE = int(os.getenv("PP_SIZE", 1))
 
 pytestmark = pytest.mark.asyncio
 
 
-@ray.remote(num_gpus=4)
-class ServerRunner:
-
-    def __init__(self, args):
-        env = os.environ.copy()
-        env["PYTHONUNBUFFERED"] = "1"
-        self.proc = subprocess.Popen(
-            ["python3", "-m", "vllm.entrypoints.openai.api_server"] + args,
-            env=env,
-            stdout=sys.stdout,
-            stderr=sys.stderr,
-        )
-        self._wait_for_server()
-
-    def ready(self):
-        return True
-
-    def _wait_for_server(self):
-        # run health check
-        start = time.time()
-        while True:
-            try:
-                if requests.get(
-                        "http://localhost:8000/health").status_code == 200:
-                    break
-            except Exception as err:
-                if self.proc.poll() is not None:
-                    raise RuntimeError("Server exited unexpectedly.") from err
-
-                time.sleep(0.5)
-                if time.time() - start > MAX_SERVER_START_WAIT_S:
-                    raise RuntimeError(
-                        "Server failed to start in time.") from err
-
-    def __del__(self):
-        if hasattr(self, "proc"):
-            self.proc.terminate()
+@pytest.fixture(scope="module")
+def ray_ctx():
+    ray.init(runtime_env={"working_dir": VLLM_PATH})
+    yield
+    ray.shutdown()
 
 
-@pytest.fixture(scope="session")
-def server():
-    ray.init()
+@pytest.fixture(scope="module")
+def server(ray_ctx):
     args = [
         "--model",
         MODEL_NAME,
         # use half precision for speed and memory savings in CI environment
         "--dtype",
         "bfloat16",
-        "--enforce-eager" if EAGER_MODE else None,
-        "--enable-chunked-prefill" if CHUNKED_PREFILL else None,
         "--pipeline-parallel-size",
-        "2",
+        str(PP_SIZE),
         "--tensor-parallel-size",
-        "2",
+        str(TP_SIZE),
+        "--distributed-executor-backend",
+        "ray",
     ]
-    server_runner = ServerRunner.remote(
-        [arg for arg in args if arg is not None])
-    ray.get(server_runner.ready.remote())
-    yield server_runner
-    ray.shutdown()
+    if CHUNKED_PREFILL:
+        args += [
+            "--enable-chunked-prefill",
+        ]
+    if EAGER_MODE:
+        args += [
+            "--enforce-eager",
+        ]
+    return RemoteOpenAIServer(args, num_gpus=PP_SIZE * TP_SIZE)
 
 
-@pytest.fixture(scope="session")
-def client():
-    client = openai.AsyncOpenAI(
-        base_url="http://localhost:8000/v1",
-        api_key="token-abc123",
-    )
-    yield client
+@pytest.fixture(scope="module")
+def client(server):
+    return server.get_async_client()
 
 
 async def test_check_models(server, client: openai.AsyncOpenAI):
