@@ -58,6 +58,7 @@ if (CUDA_FOUND AND NOT NVCC_EXECUTABLE)
     message(FATAL_ERROR "nvcc not found")
 endif()
 
+set(CMAKE_CUDA_COMPILER "/usr/local/cuda/bin/nvcc")
 #
 # Import torch cmake configuration.
 # Torch also imports CUDA (and partially HIP) languages with some customizations,

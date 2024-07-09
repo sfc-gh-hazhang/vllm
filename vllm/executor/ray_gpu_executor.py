@@ -130,6 +130,17 @@ class RayGPUExecutor(DistributedGPUExecutor):
                 "adjusting the Ray placement group or running the driver on a "
                 "GPU node.")
 
+        driver_ip = ray.get(self.driver_dummy_worker.get_node_ip.remote())
+        worker_ips = [ray.get(worker.get_node_ip.remote()) for worker in self.workers]
+        ip_counts = {}
+        for ip in worker_ips:
+            ip_counts[ip] = ip_counts.get(ip, 0) + 1
+
+        def sort_by_driver_then_worker_ip(worker):
+            ip = ray.get(worker.get_node_ip.remote())
+            return (ip != driver_ip, ip_counts[ip], ip)
+        self.workers = sorted(self.workers, key=sort_by_driver_then_worker_ip)
+
         # Get the set of GPU IDs used on each node.
         worker_node_and_gpu_ids = self._run_workers("get_node_and_gpu_ids",
                                                     use_dummy_driver=True)

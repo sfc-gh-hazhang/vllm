@@ -290,6 +290,9 @@ class LlamaModel(nn.Module):
         intermediate_tensors: Optional[IntermediateTensors],
         inputs_embeds: Optional[torch.Tensor] = None,
     ) -> Union[torch.Tensor, IntermediateTensors]:
+        my_tp_rank = get_tensor_model_parallel_rank()
+        my_pp_rank = get_pp_group().is_first_rank
+        # print(f"My PP rank: {my_pp_rank}, my TP rank: {my_tp_rank}....")
         if get_pp_group().is_first_rank:
             if inputs_embeds is not None:
                 hidden_states = inputs_embeds
