@@ -1,5 +1,6 @@
 import asyncio
 import os
+import time
 import pickle
 from collections import defaultdict
 from itertools import islice, repeat
@@ -350,6 +351,97 @@ class RayGPUExecutor(DistributedGPUExecutor):
         return forward_dag.experimental_compile()
 
 
+from vllm.sequence import (CompletionSequenceGroupOutput, Logprob,
+                           PromptLogprobs, SampleLogprobs, SamplerOutput,
+                           SequenceOutput)
+
+def _build_sampler_output(
+    # logits: torch.Tensor,
+    exec_req: ExecuteModelRequest
+) -> SamplerOutput:
+    """Construct Python objects with the output of sampling.
+
+    Args:
+        on_device_tensors: Tuple containing on-device tensors with the
+            probabilities used in sampling and the sampled token ids. This
+            allows post-processing without copies to CPU/serialization, e.g. in
+            speculative decoding rejection sampling.
+    """
+    # device = logits.device
+    # logprobs = torch.log_softmax(logits, dim=-1, dtype=torch.float)
+
+    sampler_output: List[CompletionSequenceGroupOutput] = []
+    NXT_TOK_ID = 679 # a random not special token
+    num_seq = 0
+    dummy_log_prob = Logprob(0.0)
+    for seq_group_metadata in exec_req.seq_group_metadata_list:
+        seq_ids = seq_ids = list(seq_group_metadata.seq_data.keys())
+
+        sampling_params = seq_group_metadata.sampling_params
+        is_prompt = seq_group_metadata.is_prompt
+        group_prompt_logprobs = None
+        if is_prompt and sampling_params.prompt_logprobs:
+            seq_data = seq_group_metadata.seq_data[seq_ids[0]]
+            computed_len = seq_data.get_num_computed_tokens()
+            prompt_tokens = seq_data.prompt_token_ids
+
+            ######## Below is the original logic for query_len but I guess
+            ######## we don't need it now...
+            # if is_prompt:
+            #     context_len = seq_data.get_num_computed_tokens()
+            # else:
+            #     # get_num_computed_tokens is incorrect for spec decoding.
+            #     # So, we should have a special logic here.
+            #     # TODO(sang): Fix it.
+            #     context_len = seq_data.get_len() - 1
+            # seq_len = min(
+            #     seq_data.get_len(),
+            #     context_len + seq_group_metadata.token_chunk_size)
+            # sliding_seq_len = seq_len
+            # sliding_context_len = context_len
+            # if (self.sliding_window is not None and not is_prompt):
+            #     curr_sliding_window_blocks = sliding_window_blocks
+            #     if self.scheduler_config.use_v2_block_manager:
+            #         # number of elements in last block
+            #         suff_len = seq_len % self.block_size
+            #         sliding_seq_len = min(
+            #             seq_len, block_aligned_sliding_window + suff_len)
+            #         if suff_len > 0:
+            #             curr_sliding_window_blocks += 1
+            #     else:
+            #         sliding_seq_len = min(seq_len, self.sliding_window)
+            #     sliding_context_len = sliding_seq_len - 1
+            # if prefix_cache_hit:
+            #     sliding_context_len = context_len
+            ######## End original code for query_len
+            query_len = seq_data.get_len()
+            # +1 because we are looking for a next prompt token.
+            next_token_index_start = computed_len + 1
+            next_token_index_end = min(computed_len + query_len + 1,
+                                        len(prompt_tokens))
+            group_prompt_logprobs = [
+                {tok_id: dummy_log_prob} for tok_id in
+                range(next_token_index_end - next_token_index_start)
+            ]
+
+        seq_outputs: List[SequenceOutput] = []
+        for parent_id in range(len(seq_ids)):
+            seq_outputs.append(
+                SequenceOutput(seq_ids[parent_id], NXT_TOK_ID, {NXT_TOK_ID: dummy_log_prob}))
+            num_seq += 1
+        sampler_output.append(
+            CompletionSequenceGroupOutput(seq_outputs, group_prompt_logprobs))
+
+    # sampled_token_probs = torch.ones((num_seq,), dtype=torch.float, device=device)
+    # sampled_token_ids = torch.ones((num_seq,), dtype=torch.long, device=device) * NXT_TOK_ID
+    return SamplerOutput(
+        outputs=sampler_output,
+        sampled_token_probs=None,
+        sampled_token_ids=None,
+        logprobs=None,
+    )
+
+
 class RayGPUExecutorAsync(RayGPUExecutor, DistributedGPUExecutorAsync):
 
     def __init__(self, *args, **kwargs):
@@ -388,9 +480,13 @@ class RayGPUExecutorAsync(RayGPUExecutor, DistributedGPUExecutorAsync):
                                         "execute_model", execute_model_req)))
 
         results = await asyncio.gather(*tasks)
-
+        if execute_model_req != None:
+            ret = [_build_sampler_output(execute_model_req)]
+        else:
+            ret = []
+        return ret
         # Only the last PP stage has the final results.
-        return results[-1]
+        # return results[-1]
 
     async def _start_worker_execution_loop(self):
         coros = [

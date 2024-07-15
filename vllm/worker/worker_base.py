@@ -1,6 +1,7 @@
 import dataclasses
 import importlib
 import os
+import time
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional, Set, Tuple, Type, Union
 
@@ -280,6 +281,7 @@ class LocalOrDistributedWorkerBase(WorkerBase):
         # Worker only supports single-step execution. Wrap the output in a
         # list to conform to interface.
         return output
+        # return [None]
 
 
 class WorkerWrapperBase:

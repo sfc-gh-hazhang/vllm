@@ -13,6 +13,7 @@ from vllm.sampling_params import SamplingType
 from vllm.sequence import (CompletionSequenceGroupOutput, Logprob,
                            PromptLogprobs, SampleLogprobs, SamplerOutput,
                            SequenceOutput)
+import numpy
 
 # (num_token_ids, num_parent_ids) per sequence group.
 SampleResultType = List[Tuple[List[int], List[int]]]
@@ -57,6 +58,42 @@ class Sampler(nn.Module):
             logits: (num_tokens, vocab_size).
             sampling_metadata: Metadata for sampling.
         """
+
+        # device = logits.device
+        # # logprobs = torch.log_softmax(logits, dim=-1, dtype=torch.float)
+
+        # sampler_output: List[CompletionSequenceGroupOutput] = []
+        # NXT_TOK_ID = numpy.random.randint(100, 500) # a random not special token
+        # num_seq = 0
+        # dummy_log_prob = Logprob(0.0)
+        # for seq_group in sampling_metadata.seq_groups:
+        #     seq_ids = seq_group.seq_ids
+
+        #     sampling_params = seq_group.sampling_params
+        #     is_prompt = seq_group.is_prompt
+        #     group_prompt_logprobs = None
+        #     if is_prompt and sampling_params.prompt_logprobs:
+        #         nxt_prompt_toks = _get_next_prompt_tokens(seq_group)
+        #         group_prompt_logprobs = [{tok_id: dummy_log_prob} for tok_id in nxt_prompt_toks]
+
+        #     seq_outputs: List[SequenceOutput] = []
+        #     for parent_id in range(len(seq_ids)):
+        #         seq_outputs.append(
+        #             SequenceOutput(seq_ids[parent_id], NXT_TOK_ID, {NXT_TOK_ID: dummy_log_prob}))
+        #         num_seq += 1
+        #     sampler_output.append(
+        #         CompletionSequenceGroupOutput(seq_outputs, group_prompt_logprobs))
+
+        # # sampled_token_probs = torch.ones((num_seq,), dtype=torch.float, device=device)
+        # # sampled_token_ids = torch.ones((num_seq,), dtype=torch.long, device=device) * NXT_TOK_ID
+        # print("Using fake sampler here.....")
+        # return SamplerOutput(
+        #     outputs=sampler_output,
+        #     sampled_token_probs=None,
+        #     sampled_token_ids=None,
+        #     logprobs=None,
+        # )
+
         assert logits is not None
         _, vocab_size = logits.shape
 
@@ -285,6 +322,8 @@ def _greedy_sample(
         same as the length of selected_seq_groups. If the corresponding
         seq_group has do_sample=False, tuple contains ([], [])
     """
+    # import pdb; pdb.set_trace()
+    # samples_lst = [150] * samples.numel()
     samples_lst = samples.tolist()
     sample_idx = 0
     results: SampleResultType = []
