@@ -572,7 +572,7 @@ class Scheduler:
                 tmp = self.running
                 self.running = orig_running
                 assert self.output_proc_callback_fn is not None
-                self.output_proc_callback_fn(is_async=True)
+                self.output_proc_callback_fn(virtual_engine=0, is_async=True)
                 self.running = tmp
 
             while not self._can_append_slots(seq_group):
